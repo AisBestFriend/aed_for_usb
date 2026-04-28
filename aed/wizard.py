@@ -14,7 +14,26 @@ import fnmatch
 from typing import Iterable, List, Optional
 
 from . import scanner, health, imager, analyzer, recover, carver
-from .util import human_bytes, IS_WINDOWS, require_admin
+from .util import (
+    human_bytes, IS_WINDOWS, require_admin,
+    desktop_dir, open_in_file_manager,
+)
+
+
+IMAGE_FOLDER_NAME = "임시usb이미지"
+RECOVERY_FOLDER_NAME = "usb복구폴더"
+
+
+def _default_image_dir() -> str:
+    return os.path.join(desktop_dir(), IMAGE_FOLDER_NAME)
+
+
+def _default_recovery_dir() -> str:
+    return os.path.join(desktop_dir(), RECOVERY_FOLDER_NAME)
+
+
+def _safe_devname(path: str) -> str:
+    return os.path.basename(path).replace("\\", "_").replace("/", "_") or "device"
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -80,11 +99,15 @@ def run() -> int:
     print(f"    -> {src.path} 선택됨")
 
     # ---- 3. 이미지 생성 --------------------------------------------------
-    default_img = os.path.join(
-        os.getcwd(),
-        f"usb_{os.path.basename(src.path).replace(chr(92), '_')}.img",
-    )
-    img_path = _ask("\n[3/5] 저장할 이미지 파일 경로를 지정하세요", default=default_img)
+    default_img_dir = _default_image_dir()
+    os.makedirs(default_img_dir, exist_ok=True)
+    default_img = os.path.join(default_img_dir, f"usb_{_safe_devname(src.path)}.img")
+
+    print("\n[3/5] 디스크 이미지를 저장할 위치")
+    print(f"    기본 경로 : {default_img}")
+    print("    [TIP] 잘 모르시면 그냥 [Enter] 키를 누르세요. 바탕화면의 "
+          f"'{IMAGE_FOLDER_NAME}' 폴더에 자동으로 저장됩니다.")
+    img_path = _ask("이미지 파일 경로", default=default_img)
     if os.path.exists(img_path):
         if _ask_yes(f"    '{img_path}' 가 이미 존재합니다. 이어받기 하시겠습니까?",
                     default=True):
@@ -114,19 +137,64 @@ def run() -> int:
     ]
     strat = _ask_choice("복구 방식", strategies)
 
-    out_root = _ask(
-        "[4/5] 복구된 파일을 저장할 폴더",
-        default=os.path.join(os.getcwd(), "recovered"),
-    )
+    default_recovery = _default_recovery_dir()
+    print("\n[4/5] 복구된 파일을 저장할 폴더")
+    print(f"    기본 경로 : {default_recovery}")
+    print("    [TIP] 잘 모르시면 그냥 [Enter] 키를 누르세요. 바탕화면의 "
+          f"'{RECOVERY_FOLDER_NAME}' 폴더에 자동으로 저장됩니다.")
+    out_root = _ask("복구 폴더", default=default_recovery)
     os.makedirs(out_root, exist_ok=True)
 
     # ---- 5. 실행 ---------------------------------------------------------
     print("\n[5/5] 복구를 시작합니다 ...")
     if strat == 0:
-        return _do_fs_walk(img_path, parts, out_root)
-    if strat == 1:
-        return _do_os_mount(img_path, out_root)
-    return _do_carve(img_path, out_root)
+        rc = _do_fs_walk(img_path, parts, out_root)
+    elif strat == 1:
+        rc = _do_os_mount(img_path, out_root)
+    else:
+        rc = _do_carve(img_path, out_root)
+
+    _print_final_summary(img_path, out_root)
+    return rc
+
+
+def _print_final_summary(img_path: str, out_root: str) -> None:
+    img_path = os.path.abspath(img_path)
+    out_root = os.path.abspath(out_root)
+    n_files = 0
+    total_bytes = 0
+    for root, _dirs, files in os.walk(out_root):
+        for f in files:
+            try:
+                total_bytes += os.path.getsize(os.path.join(root, f))
+                n_files += 1
+            except OSError:
+                pass
+
+    print()
+    print("=" * 70)
+    print("  복구 완료 안내")
+    print("=" * 70)
+    print(f"  복구된 파일 위치 :  {out_root}")
+    print(f"  복구된 파일 수   :  {n_files} 개  ({human_bytes(total_bytes)})")
+    print(f"  디스크 이미지    :  {img_path}")
+    try:
+        img_size = os.path.getsize(img_path)
+        print(f"                      ({human_bytes(img_size)})")
+    except OSError:
+        pass
+    print()
+    print("  [안내]")
+    print("   - 복구된 파일이 정상인지 확인하신 뒤,")
+    print(f"     디스크 이미지(.img) 는 용량을 차지하므로 더 이상 필요 없으면 삭제하셔도 됩니다.")
+    print("   - 복구가 부족하면 같은 이미지로 다른 방식(시그니처 카빙 등)을 다시 시도할 수 있습니다.")
+    print("=" * 70)
+
+    if _ask_yes("\n복구된 폴더를 지금 열어볼까요?", default=True):
+        if open_in_file_manager(out_root):
+            print(f"[+] 탐색기에서 열었습니다: {out_root}")
+        else:
+            print(f"[!] 자동으로 열지 못했습니다. 위 경로를 직접 열어 확인하세요.")
 
 
 def _do_fs_walk(img_path: str, parts, out_root: str) -> int:

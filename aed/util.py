@@ -13,6 +13,36 @@ IS_LINUX = platform.system() == "Linux"
 _ELEVATED_ENV_FLAG = "AED_ELEVATED"
 
 
+def desktop_dir() -> str:
+    """사용자 바탕화면 경로를 반환. 없으면 홈 디렉토리."""
+    home = os.path.expanduser("~")
+    candidates = [
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "바탕 화면"),
+        os.path.join(home, "바탕화면"),
+        os.path.join(home, "OneDrive", "Desktop"),
+        os.path.join(home, "OneDrive", "바탕 화면"),
+    ]
+    for p in candidates:
+        if os.path.isdir(p):
+            return p
+    return home
+
+
+def open_in_file_manager(path: str) -> bool:
+    """OS 의 파일 탐색기로 폴더를 엽니다. 성공 시 True."""
+    try:
+        if IS_WINDOWS:
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return True
+    except Exception:
+        return False
+
+
 def init_console() -> None:
     """Make sure stdout/stderr can print Korean on a Windows console."""
     if not IS_WINDOWS:
