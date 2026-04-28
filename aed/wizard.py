@@ -1,12 +1,11 @@
-"""Interactive wizard.
+"""대화형 마법사.
 
-Walks the user through:
-  1. Detect failing USBs
-  2. Pick the source device
-  3. Image it (with bad-sector handling, live progress)
-  4. Choose what to recover (whole volume, a folder, or a glob like *.jpg)
-  5. Choose where to write recovered files
-  6. Run recovery and show progress
+사용자를 다음 흐름으로 안내합니다:
+  1. 불량 USB 자동 탐지
+  2. 복구할 USB 선택
+  3. 안전한 이미지 생성 (배드 섹터 자동 처리, 실시간 진행 표시)
+  4. 복구 범위 선택 (전체 / 폴더 / 패턴 / 삭제 파일 포함)
+  5. 대상 폴더 선택 후 복구 실행
 """
 
 import os
@@ -31,33 +30,33 @@ def _ask_choice(prompt: str, options: List[str]) -> int:
         raw = input(f"{prompt} (1-{len(options)}): ").strip()
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return int(raw) - 1
-        print("    invalid choice, try again.")
+        print("    잘못된 입력입니다. 다시 시도하세요.")
 
 
 def _ask_yes(prompt: str, default: bool = True) -> bool:
-    d = "Y/n" if default else "y/N"
+    d = "예/아니오 (Y/n)" if default else "예/아니오 (y/N)"
     raw = input(f"{prompt} [{d}]: ").strip().lower()
     if not raw:
         return default
-    return raw in ("y", "yes")
+    return raw in ("y", "yes", "예", "ㅇ", "y.")
 
 
 def run() -> int:
     print("=" * 70)
-    print("  AED for USB - safe USB recovery wizard")
+    print("  AED for USB - USB 안전 복구 마법사")
     print("=" * 70)
 
     require_admin()
 
-    # ---- 1. detect ------------------------------------------------------
-    print("\n[1/5] scanning for storage devices ...")
+    # ---- 1. 장치 탐지 ----------------------------------------------------
+    print("\n[1/5] 디스크를 검색합니다 ...")
     devs = scanner.scan()
     if not devs:
-        print("    no devices detected. is the USB plugged in?")
+        print("    검색된 디스크가 없습니다. USB 가 연결되어 있는지 확인하세요.")
         return 1
     scanner.print_table(devs)
 
-    print("\n[1/5] running health probe (this is read-only) ...")
+    print("\n[1/5] USB 건강 상태를 진단합니다 (읽기만 수행, 안전) ...")
     results = health.diagnose_all(devs)
     health.print_health(results)
 
@@ -67,27 +66,28 @@ def run() -> int:
     ]
     if suspect:
         print(
-            f"\n[!] {len(suspect)} device(s) flagged as suspect "
-            "(BAD/WARN/UNREADABLE) - those are the likely recovery targets."
+            f"\n[!] {len(suspect)} 개 장치가 의심 상태(불량/주의/읽기실패)로 감지되었습니다. "
+            "이런 장치가 보통 복구 대상입니다."
         )
     else:
-        print("\n[i] no obvious failures detected. you can still recover any device.")
+        print("\n[i] 명백한 결함은 발견되지 않았습니다. 원하는 장치를 선택해 진행하세요.")
 
-    # ---- 2. pick source -------------------------------------------------
+    # ---- 2. 소스 선택 ----------------------------------------------------
     options = [f"{d.path}  ({human_bytes(d.size)}, {d.bus}, {d.model})"
                for d in devs]
-    idx = _ask_choice("\n[2/5] pick the SOURCE device", options)
+    idx = _ask_choice("\n[2/5] 복구할 USB(원본 장치)를 선택하세요", options)
     src = devs[idx]
-    print(f"    -> {src.path}")
+    print(f"    -> {src.path} 선택됨")
 
-    # ---- 3. image -------------------------------------------------------
+    # ---- 3. 이미지 생성 --------------------------------------------------
     default_img = os.path.join(
         os.getcwd(),
         f"usb_{os.path.basename(src.path).replace(chr(92), '_')}.img",
     )
-    img_path = _ask("\n[3/5] image file path to write to", default=default_img)
+    img_path = _ask("\n[3/5] 저장할 이미지 파일 경로를 지정하세요", default=default_img)
     if os.path.exists(img_path):
-        if _ask_yes(f"    '{img_path}' exists. resume?", default=True):
+        if _ask_yes(f"    '{img_path}' 가 이미 존재합니다. 이어받기 하시겠습니까?",
+                    default=True):
             resume = True
         else:
             os.remove(img_path)
@@ -98,30 +98,30 @@ def run() -> int:
     else:
         resume = False
 
-    print(f"    imaging (this may take a while; bad sectors will be skipped + retried)")
+    print("    이미징 시작 - 시간이 걸릴 수 있습니다. 배드 섹터는 자동 재시도/스킵합니다.")
     stats = imager.image_device(src.path, img_path, resume=resume)
     imager.print_summary(src.path, img_path, stats)
 
-    # ---- 4. plan recovery ----------------------------------------------
+    # ---- 4. 복구 전략 ----------------------------------------------------
     parts = analyzer.analyze(img_path)
     analyzer.print_partitions(img_path, parts)
 
-    print("\n[4/5] choose recovery STRATEGY")
+    print("\n[4/5] 복구 방식을 선택하세요")
     strategies = [
-        "Filesystem walk  - copy live files (FAT12/16/32, fast & accurate)",
-        "Mount + copy     - let the OS read it (NTFS/exFAT)",
-        "Signature carve  - extract by file headers (use if FS is destroyed)",
+        "파일시스템 워크   - 살아있는 파일 그대로 복구 (FAT12/16/32, 가장 정확)",
+        "OS 마운트 후 복사  - NTFS / exFAT 처럼 OS 가 읽을 수 있을 때",
+        "시그니처 카빙     - 파일시스템이 망가졌을 때 헤더로 추출 (마지막 수단)",
     ]
-    strat = _ask_choice("strategy", strategies)
+    strat = _ask_choice("복구 방식", strategies)
 
     out_root = _ask(
-        "[4/5] recovered files target DIRECTORY",
+        "[4/5] 복구된 파일을 저장할 폴더",
         default=os.path.join(os.getcwd(), "recovered"),
     )
     os.makedirs(out_root, exist_ok=True)
 
-    # ---- 5. execute -----------------------------------------------------
-    print("\n[5/5] running recovery ...")
+    # ---- 5. 실행 ---------------------------------------------------------
+    print("\n[5/5] 복구를 시작합니다 ...")
     if strat == 0:
         return _do_fs_walk(img_path, parts, out_root)
     if strat == 1:
@@ -131,31 +131,31 @@ def run() -> int:
 
 def _do_fs_walk(img_path: str, parts, out_root: str) -> int:
     if not parts:
-        if not _ask_yes("no partitions detected. try treating image as a "
-                        "single FAT volume?", default=True):
+        if not _ask_yes("파티션을 찾지 못했습니다. 이미지 전체를 단일 FAT 볼륨으로 시도하시겠습니까?",
+                        default=True):
             return 1
         offset = 0
     else:
         opts = [p.describe() for p in parts]
-        idx = _ask_choice("which partition to recover", opts)
+        idx = _ask_choice("복구할 파티션을 선택하세요", opts)
         offset = parts[idx].start
 
-    # filtering
-    print("\nrecovery scope:")
-    print("  1) ALL files")
-    print("  2) only one folder (path inside the volume, e.g. 'DCIM/Camera')")
-    print("  3) only files matching a pattern (e.g. '*.jpg', '*.docx')")
-    print("  4) include DELETED files too")
-    raw = input("scope (default 1; comma-combine, e.g. '3,4'): ").strip() or "1"
+    # 필터링 옵션
+    print("\n복구 범위 선택:")
+    print("  1) 전체 파일")
+    print("  2) 특정 폴더만 (볼륨 안 경로, 예: 'DCIM/Camera')")
+    print("  3) 패턴 일치만 (예: '*.jpg', '*.docx')")
+    print("  4) 삭제된 파일도 포함")
+    raw = input("선택 (기본 1; 콤마로 조합 가능, 예 '3,4'): ").strip() or "1"
     flags = {x.strip() for x in raw.split(",") if x.strip()}
 
     folder_filter = ""
     pattern = ""
     include_deleted = "4" in flags
     if "2" in flags:
-        folder_filter = _ask("folder path inside the volume").strip("/\\")
+        folder_filter = _ask("볼륨 내부 폴더 경로").strip("/\\")
     if "3" in flags:
-        pattern = _ask("filename glob pattern", default="*.*")
+        pattern = _ask("파일명 패턴", default="*.*")
 
     return _filtered_fat_recover(
         img_path, offset, out_root,
@@ -175,13 +175,12 @@ def _filtered_fat_recover(
                             include_deleted=include_deleted)
         return 0
 
-    # Re-implement walk with filters
     with open(img_path, "rb") as img:
         img.seek(offset)
         bpb = img.read(512)
         layout = recover._parse_fat_bpb(bpb, offset)
         if not layout:
-            print("[!] not a FAT volume at this offset; try strategy 2 or 3.")
+            print("[!] 이 위치에 FAT 볼륨이 없습니다. 다른 방식(2번/3번)을 시도하세요.")
             return 1
         img.seek(layout.fat_offset)
         fat = img.read(layout.fat_size)
@@ -218,20 +217,20 @@ def _filtered_fat_recover(
             with open(os.path.join(sub, safe), "wb") as fh:
                 fh.write(data)
             n += 1
-            print(f"    [{ 'DEL' if ent['deleted'] else 'OK ' }] "
+            print(f"    [{ '삭제됨' if ent['deleted'] else '정상' }] "
                   f"{full_rel}  ({human_bytes(len(data))})")
-        print(f"\n[+] recovered {n} matching files into {out_dir}")
+        print(f"\n[+] 조건과 일치하는 {n} 개 파일을 {out_dir} 로 복구했습니다")
     return 0
 
 
 def _do_os_mount(img_path: str, out_dir: str) -> int:
     n = recover.os_mount_and_copy(img_path, out_dir)
-    print(f"[+] copied {n} files via OS mount.")
+    print(f"[+] OS 마운트 방식으로 {n} 개 파일을 복사했습니다.")
     return 0
 
 
 def _do_carve(img_path: str, out_dir: str) -> int:
-    raw = _ask("max files to recover (0 = unlimited)", default="0")
+    raw = _ask("최대 추출 파일 수 (0 = 무제한)", default="0")
     try:
         max_files = int(raw)
     except ValueError:

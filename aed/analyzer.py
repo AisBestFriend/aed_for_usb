@@ -120,11 +120,11 @@ def analyze(image_path: str) -> List[Partition]:
 
 
 def print_partitions(image_path: str, parts: List[Partition]) -> None:
-    print(f"[+] image: {image_path}  ({human_bytes(os.path.getsize(image_path))})")
+    print(f"[+] 이미지: {image_path}  ({human_bytes(os.path.getsize(image_path))})")
     if not parts:
-        print("    no partition table detected (use `aed carve` to extract by signature)")
+        print("    파티션 테이블을 찾지 못했습니다 (시그니처 카빙 모드 사용 권장)")
         return
-    print("    INDEX OFFSET           SIZE        TYPE    LABEL")
+    print("    번호   오프셋          크기         타입    레이블")
     print("    " + "-" * 64)
     for p in parts:
         print(p.describe())

@@ -30,6 +30,9 @@ class Device:
         )
 
 
+__all__ = ["Device", "scan", "print_table"]
+
+
 def _run(cmd: list, timeout: int = 30) -> str:
     return subprocess.check_output(
         cmd, stderr=subprocess.STDOUT, timeout=timeout, text=True
@@ -109,13 +112,12 @@ def scan() -> List[Device]:
 
 def print_table(devices: List[Device]) -> None:
     if not devices:
-        print("(no block devices found - run as Administrator/root)")
+        print("(검색된 디스크가 없습니다 - 관리자/root 권한으로 다시 시도하세요)")
         return
-    print("    DEVICE                       SIZE     BUS     MODEL")
+    print("    장치 경로                     크기      버스     모델")
     print("    " + "-" * 70)
     for d in devices:
         print("   ", d.describe())
     print(
-        "\n[i] [USB] = removable / USB-bus device. "
-        "Always image a USB before recovery."
+        "\n[i] [USB] 표시 = 이동식 / USB 버스 장치. 복구 전에 반드시 이미지로 떠내세요."
     )

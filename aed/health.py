@@ -29,10 +29,10 @@ class Health:
     smart: str = ""
 
     def describe(self) -> str:
-        flag = {"OK": "[ OK  ]", "WARN": "[WARN ]",
-                "BAD": "[ BAD ]", "UNREADABLE": "[FAIL ]"}[self.label]
+        flag = {"OK": "[ 정상  ]", "WARN": "[ 주의  ]",
+                "BAD": "[ 불량  ]", "UNREADABLE": "[읽기실패]"}[self.label]
         lat = f"{self.latency_ms:6.1f}ms" if self.latency_ms is not None else "  --  "
-        return f"{flag} {self.path:<24} probe={lat}  smart={self.smart or '-'}  " \
+        return f"{flag} {self.path:<24} 응답={lat}  SMART={self.smart or '-'}  " \
                f"{'; '.join(self.notes)}"
 
 
@@ -93,7 +93,7 @@ def diagnose(path: str, size_hint: int = 0) -> Health:
                     try:
                         _read_windows(h, off, 4096)
                     except OSError as e:
-                        notes.append(f"read error @ {human_bytes(off)}: {e}")
+                        notes.append(f"읽기 오류 @ {human_bytes(off)}: {e}")
             finally:
                 _close_windows(h)
         else:
@@ -108,13 +108,13 @@ def diagnose(path: str, size_hint: int = 0) -> Health:
                         os.lseek(fd, off, os.SEEK_SET)
                         os.read(fd, 4096)
                     except OSError as e:
-                        notes.append(f"read error @ {human_bytes(off)}: {e}")
+                        notes.append(f"읽기 오류 @ {human_bytes(off)}: {e}")
             finally:
                 os.close(fd)
     except OSError as e:
         return Health(
             path=path, ok=False, label="UNREADABLE",
-            notes=[f"open failed: {e}"], smart=smart,
+            notes=[f"열기 실패: {e}"], smart=smart,
         )
 
     label = "OK"
@@ -122,11 +122,11 @@ def diagnose(path: str, size_hint: int = 0) -> Health:
         notes.append(f"SMART={smart}")
         label = "WARN"
     if latency is not None and latency > 250:
-        notes.append(f"slow probe ({latency:.0f}ms)")
+        notes.append(f"응답 지연({latency:.0f}ms)")
         label = "WARN"
-    if any("read error" in n for n in notes):
+    if any("읽기 오류" in n or "read error" in n for n in notes):
         label = "BAD"
-    if any("boot signature" in n.lower() for n in notes) and label == "OK":
+    if any("부트 서명" in n or "boot signature" in n.lower() for n in notes) and label == "OK":
         label = "WARN"
 
     return Health(path=path, ok=(label == "OK"), label=label,
@@ -135,10 +135,10 @@ def diagnose(path: str, size_hint: int = 0) -> Health:
 
 def _check_boot_signature(sec0: bytes, notes: List[str]) -> None:
     if len(sec0) < 512:
-        notes.append("short read on sector 0")
+        notes.append("0번 섹터 읽기 분량 부족")
         return
     if sec0[510:512] != b"\x55\xaa":
-        notes.append("missing MBR boot signature (0x55AA)")
+        notes.append("MBR 부트 서명(0x55AA) 없음")
     # quick FS-type hint
     if sec0[3:11] in (b"NTFS    ", b"EXFAT   "):
         return
@@ -156,9 +156,9 @@ def diagnose_all(devices) -> List[Health]:
 
 def print_health(results: List[Health]) -> None:
     if not results:
-        print("(no devices to probe)")
+        print("(진단할 장치가 없습니다)")
         return
-    print("    STATUS  DEVICE                  PROBE      SMART          NOTES")
-    print("    " + "-" * 78)
+    print("    상태       장치 경로                응답         SMART      비고")
+    print("    " + "-" * 80)
     for r in results:
         print("   ", r.describe())

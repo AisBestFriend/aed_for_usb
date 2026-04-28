@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
-"""AED for USB - safe USB recovery toolkit.
+"""AED for USB - USB 안전 복구 도구.
 
-Usage:
-  aed                              # interactive wizard (recommended)
-  aed scan                         # list block devices
-  aed health                       # probe devices, flag failing USBs
-  aed image  <DEV> <OUT.img>       # image a device, skipping bad sectors
-  aed analyze <IMG>                # show MBR/GPT partitions in image
-  aed recover <IMG> <OUTDIR>       # walk FAT in image, copy live files
-  aed mount-copy <IMG> <OUTDIR>    # OS-mount image read-only and copy
-  aed carve   <IMG|DEV> <OUTDIR>   # signature-based carving (no FS needed)
+사용법:
+  aed                              # 대화형 마법사 (권장)
+  aed scan                         # 디스크 목록 표시
+  aed health                       # 디스크 건강 진단 (불량 USB 표시)
+  aed image  <장치> <이미지파일>    # 배드 섹터를 건너뛰며 이미지 생성
+  aed analyze <이미지파일>          # 이미지의 MBR/GPT 파티션 표시
+  aed recover <이미지파일> <폴더>   # 이미지에서 FAT 살아있는 파일 복구
+  aed mount-copy <이미지> <폴더>    # OS 마운트 후 파일 복사 (NTFS/exFAT)
+  aed carve   <이미지|장치> <폴더>  # 시그니처 기반 카빙 (FS 깨졌을 때)
 
-Notes:
-  - Requires Administrator (Windows) / root (Linux). On Windows the program
-    auto-requests UAC elevation.
-  - Operations on the SOURCE device are read-only. The image is the only file
-    that ever gets written to.
-  - Even when File Explorer cannot open the USB (RAW / corrupt FS), this tool
-    can still image and recover from it as long as Disk Management sees it.
+알아두기:
+  - 관리자(Windows) / root(Linux) 권한이 필요합니다. Windows 는 자동으로
+    UAC 권한 요청 창을 띄웁니다.
+  - 원본 USB 는 절대 쓰지 않습니다. 이미지 파일에만 기록합니다.
+  - 파일 탐색기에서 USB 를 못 열어도(RAW / 깨진 FS) 디스크 관리에서 보이기만
+    하면 이 도구로 이미징 + 복구 가능합니다.
 """
 
 import sys
 import os
 
 from aed import scanner, health, imager, analyzer, recover, carver, wizard
-from aed.util import ensure_admin, human_bytes
+from aed.util import ensure_admin, human_bytes, init_console
 
 
 def _usage() -> int:
@@ -47,7 +46,7 @@ def cmd_health(_args):
 
 def cmd_image(args):
     if len(args) != 2:
-        print("usage: aed image <DEVICE> <OUT.img>")
+        print("사용법: aed image <장치경로> <저장할 이미지 파일>")
         return 1
     ensure_admin()
     src, dst = args
@@ -58,7 +57,7 @@ def cmd_image(args):
 
 def cmd_analyze(args):
     if len(args) != 1:
-        print("usage: aed analyze <IMAGE>")
+        print("사용법: aed analyze <이미지 파일>")
         return 1
     parts = analyzer.analyze(args[0])
     analyzer.print_partitions(args[0], parts)
@@ -67,7 +66,7 @@ def cmd_analyze(args):
 
 def cmd_recover(args):
     if len(args) < 2:
-        print("usage: aed recover <IMAGE> <OUTDIR> [--offset N] [--include-deleted]")
+        print("사용법: aed recover <이미지> <복구폴더> [--offset N] [--include-deleted]")
         return 1
     img, out = args[0], args[1]
     rest = args[2:]
@@ -82,7 +81,7 @@ def cmd_recover(args):
             include_deleted = True
             i += 1
         else:
-            print(f"unknown option: {rest[i]}")
+            print(f"알 수 없는 옵션: {rest[i]}")
             return 1
     recover.fat_recover(img, out, part_offset=offset,
                         include_deleted=include_deleted)
@@ -91,17 +90,17 @@ def cmd_recover(args):
 
 def cmd_mount_copy(args):
     if len(args) != 2:
-        print("usage: aed mount-copy <IMAGE> <OUTDIR>")
+        print("사용법: aed mount-copy <이미지> <복구폴더>")
         return 1
     ensure_admin()
     n = recover.os_mount_and_copy(args[0], args[1])
-    print(f"[+] {n} files copied")
+    print(f"[+] {n} 개 파일을 복사했습니다")
     return 0
 
 
 def cmd_carve(args):
     if len(args) < 2:
-        print("usage: aed carve <IMAGE|DEVICE> <OUTDIR> [--max N]")
+        print("사용법: aed carve <이미지|장치> <복구폴더> [--max N]")
         return 1
     src, out = args[0], args[1]
     max_files = 0
@@ -130,19 +129,20 @@ COMMANDS = {
 
 
 def main(argv=None) -> int:
+    init_console()
     argv = argv or sys.argv[1:]
     if not argv:
         return cmd_wizard([])
-    if argv[0] in ("-h", "--help", "help"):
+    if argv[0] in ("-h", "--help", "help", "도움말"):
         return _usage()
     cmd = COMMANDS.get(argv[0])
     if cmd is None:
-        print(f"unknown command: {argv[0]}\n")
+        print(f"알 수 없는 명령: {argv[0]}\n")
         return _usage()
     try:
         return cmd(argv[1:])
     except KeyboardInterrupt:
-        print("\n[!] interrupted")
+        print("\n[!] 사용자가 중단했습니다")
         return 130
     except RuntimeError as e:
         print(f"[!] {e}", file=sys.stderr)

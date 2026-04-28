@@ -114,7 +114,7 @@ def carve(
     """
     os.makedirs(out_dir, exist_ok=True)
     total = _size_of(src)
-    prog = Progress(max(total, 1), label="carve")
+    prog = Progress(max(total, 1), label="카빙")
     found = 0
     overlap = 1 * 1024 * 1024              # carry-over so big files survive
     buf = b""
@@ -146,13 +146,13 @@ def carve(
                     fo.write(data)
                 found += 1
                 print(
-                    f"    [+] {sig.name:<11} @ off={base + pos:>12}  "
-                    f"size={human_bytes(len(data)):>10}  -> {fname}"
+                    f"    [+] {sig.name:<11} @ 오프셋={base + pos:>12}  "
+                    f"크기={human_bytes(len(data)):>10}  -> {fname}"
                 )
                 pos = end
                 if max_files and found >= max_files:
                     prog.finish()
-                    print(f"[+] reached max_files={max_files}")
+                    print(f"[+] 최대 추출 개수({max_files}) 도달")
                     return found
             keep = max(0, len(buf) - scan_end)
             base += len(buf) - keep
@@ -160,7 +160,7 @@ def carve(
             prog.update(min(base + len(buf), total))
 
     prog.finish()
-    print(f"[+] carving complete: {found} files -> {out_dir}")
+    print(f"[+] 카빙 완료: {found} 개 파일 -> {out_dir}")
     return found
 
 

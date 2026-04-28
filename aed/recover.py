@@ -232,11 +232,11 @@ def fat_recover(
         bpb = img.read(512)
         layout = _parse_fat_bpb(bpb, part_offset)
         if not layout:
-            print("[!] not a FAT volume at this offset")
+            print("[!] 이 오프셋에 FAT 볼륨이 없습니다")
             return 0
         print(
-            f"[+] {layout.fat_type}  cluster={layout.cluster_size}B  "
-            f"clusters={layout.total_clusters}"
+            f"[+] {layout.fat_type}  클러스터크기={layout.cluster_size}B  "
+            f"총 클러스터={layout.total_clusters}"
         )
         img.seek(layout.fat_offset)
         fat = img.read(layout.fat_size)
@@ -269,11 +269,11 @@ def fat_recover(
                 fh.write(data)
             count += 1
             print(
-                f"    [{ 'DEL' if ent['deleted'] else 'OK ' }] "
+                f"    [{ '삭제됨' if ent['deleted'] else '정상' }] "
                 f"{os.path.join(ent['path'], safe)}  "
                 f"({human_bytes(len(data))})"
             )
-        print(f"[+] recovered {count} files into {out_dir}")
+        print(f"[+] {count} 개 파일을 {out_dir} 로 복구했습니다")
         return count
 
 
@@ -288,13 +288,13 @@ def _safe_filename(name: str) -> str:
 
 
 def os_mount_and_copy(image_path: str, out_dir: str) -> int:
-    """Mount image read-only, copy files, then dismount."""
+    """이미지를 읽기 전용으로 마운트한 뒤 파일을 복사하고 분리합니다."""
     os.makedirs(out_dir, exist_ok=True)
     if IS_WINDOWS:
         return _windows_mount_copy(image_path, out_dir)
     if IS_LINUX:
         return _linux_mount_copy(image_path, out_dir)
-    print("[!] unsupported OS for mount-based recovery")
+    print("[!] 이 OS 에서는 마운트 기반 복구가 지원되지 않습니다")
     return 0
 
 
@@ -310,13 +310,13 @@ def _windows_mount_copy(image_path: str, out_dir: str) -> int:
             text=True, stderr=subprocess.STDOUT,
         ).strip().splitlines()[-1]
     except subprocess.CalledProcessError as e:
-        print("[!] Mount-DiskImage failed:", e.output)
+        print("[!] Mount-DiskImage 실패:", e.output)
         return 0
     if not letter:
-        print("[!] mount succeeded but no drive letter assigned")
+        print("[!] 마운트는 성공했지만 드라이브 문자가 할당되지 않았습니다")
         return 0
     src = f"{letter}:\\"
-    print(f"[+] mounted at {src} (read-only). copying...")
+    print(f"[+] {src} 로 읽기 전용 마운트됨. 복사 시작...")
     try:
         # /B = backup mode (read locked files), /E recurse, /R:1 retry once
         rc = subprocess.call(
@@ -330,13 +330,13 @@ def _windows_mount_copy(image_path: str, out_dir: str) -> int:
              f"Dismount-DiskImage -ImagePath '{img}' | Out-Null"]
         )
     if not ok:
-        print(f"[!] robocopy returned {rc}; some files may be missing")
+        print(f"[!] robocopy 반환 코드 {rc}; 일부 파일이 누락되었을 수 있습니다")
     return _count_files(out_dir)
 
 
 def _linux_mount_copy(image_path: str, out_dir: str) -> int:
     if not (shutil.which("mount") and shutil.which("losetup")):
-        print("[!] mount/losetup not available")
+        print("[!] mount/losetup 명령을 찾을 수 없습니다")
         return 0
     mnt = out_dir + ".mnt"
     os.makedirs(mnt, exist_ok=True)
@@ -354,7 +354,7 @@ def _linux_mount_copy(image_path: str, out_dir: str) -> int:
                 mounted = c
                 break
         if not mounted:
-            print("[!] could not mount any partition")
+            print("[!] 어떤 파티션도 마운트하지 못했습니다")
             return 0
         subprocess.call(["cp", "-a", mnt + "/.", out_dir])
         subprocess.call(["umount", mnt])

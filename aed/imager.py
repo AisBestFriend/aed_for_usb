@@ -157,8 +157,7 @@ def image_device(
     if total <= 0:
         close_fn()
         raise RuntimeError(
-            f"Could not determine size of {src}. "
-            "Make sure the device is recognized by the OS."
+            f"{src} 의 용량을 확인할 수 없습니다. OS 가 장치를 인식하는지 확인하세요."
         )
 
     flags = "r+b" if (resume and os.path.exists(dst)) else "wb"
@@ -168,7 +167,7 @@ def image_device(
         out.truncate(total)
 
     stats = ImageStats(total=total)
-    prog = Progress(total, label=f"image {os.path.basename(src)}")
+    prog = Progress(total, label=f"이미징 {os.path.basename(src)}")
     offset = resume_from
 
     def _try_read(off: int, length: int) -> Optional[bytes]:
@@ -192,8 +191,8 @@ def image_device(
                 out.write(data)
                 stats.good += length
                 offset += length
-                prog.update(offset, f"good={human_bytes(stats.good)} "
-                                    f"bad={human_bytes(stats.bad)}")
+                prog.update(offset, f"정상={human_bytes(stats.good)} "
+                                    f"불량={human_bytes(stats.bad)}")
                 continue
 
             # Slow-path: bisect down to small blocks, mark bad regions.
@@ -226,8 +225,8 @@ def image_device(
                         finer += flen
                     sub += sublen
             offset = end
-            prog.update(offset, f"good={human_bytes(stats.good)} "
-                                f"bad={human_bytes(stats.bad)}")
+            prog.update(offset, f"정상={human_bytes(stats.good)} "
+                                f"불량={human_bytes(stats.bad)}")
     finally:
         prog.finish()
         out.flush()
@@ -249,15 +248,15 @@ def image_device(
 
 def print_summary(src: str, dst: str, stats: ImageStats) -> None:
     print()
-    print(f"[+] image complete: {dst}")
-    print(f"    source:   {src}")
-    print(f"    size:     {human_bytes(stats.total)}")
-    print(f"    good:     {human_bytes(stats.good)}")
-    print(f"    bad:      {human_bytes(stats.bad)}")
-    print(f"    retries:  {stats.retried}")
-    print(f"    log:      {dst}.aedlog")
+    print(f"[+] 이미징 완료: {dst}")
+    print(f"    원본 장치 :  {src}")
+    print(f"    용량      :  {human_bytes(stats.total)}")
+    print(f"    정상 영역 :  {human_bytes(stats.good)}")
+    print(f"    불량 영역 :  {human_bytes(stats.bad)}")
+    print(f"    재시도수  :  {stats.retried}")
+    print(f"    로그 파일 :  {dst}.aedlog")
     if stats.bad:
         print(
-            "[!] some sectors were unreadable; re-run `aed image` to retry "
-            "(it will resume from the log)."
+            "[!] 읽지 못한 섹터가 있습니다. `aed image` 를 다시 실행하면 "
+            "로그를 보고 이어서 재시도합니다."
         )
