@@ -1,0 +1,31 @@
+AED for USB - 플랫폼별 실행파일
+====================================
+
+Windows (x64)
+  파일      : aed.exe  또는  aed-windows-x64-v0.1.0.zip
+  실행      : 더블클릭 (UAC 승인 → 마법사 시작)
+  요구사항  : Windows 10/11 x64, 관리자 권한
+
+Linux (x86_64)
+  파일      : aed-linux-x86_64  또는  aed-linux-x86_64-v0.1.0.tar.gz
+  실행      : chmod +x aed-linux-x86_64
+              sudo ./aed-linux-x86_64
+  요구사항  : glibc 2.17+ (Ubuntu 18.04 이상, RHEL 8 이상)
+
+macOS (Apple Silicon / Intel)
+  파일      : aed-macos-arm64  /  aed-macos-x86_64
+  실행      : chmod +x aed-macos-arm64
+              sudo ./aed-macos-arm64
+  요구사항  : macOS 11+
+
+  ⚠ macOS 바이너리는 macOS 호스트에서만 빌드 가능합니다.
+    이 저장소의 GitHub Actions (.github/workflows/build.yml) 가
+    macos-latest / macos-13 러너에서 자동으로 빌드합니다.
+    → 저장소 → Actions 탭 → "build-binaries" workflow 결과의
+       Artifacts 에서 aed-macos-arm64 / aed-macos-x86_64 다운로드.
+
+직접 빌드하기 (어떤 플랫폼이든)
+====================================
+    pip install pyinstaller
+    python build/build.py
+  결과: dist/aed (또는 dist/aed.exe)
