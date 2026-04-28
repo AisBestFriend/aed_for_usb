@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.pyo
+*.img
+*.aedlog
+recovered/
+dist/
+build/_work/
+*.spec.bak
