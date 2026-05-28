@@ -147,6 +147,62 @@ def _device_size_posix(fd) -> int:
         os.lseek(fd, 0, os.SEEK_SET)
 
 
+class SizeUnknownError(RuntimeError):
+    """Raised when the device size cannot be determined by any means."""
+
+
+def _readable_at(read_fn, off: int) -> bool:
+    """True if at least one sector in a small window around `off` reads OK.
+
+    Reading a few nearby points avoids treating an isolated bad sector as the
+    end of the device during capacity probing.
+    """
+    for delta in (0, SECTOR, 64 * 1024, 256 * 1024):
+        try:
+            d = read_fn(off + delta, SECTOR)
+            if d and len(d) == SECTOR:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _discover_size(read_fn, cap: int = 4 * 1024 ** 4) -> int:
+    """Find readable capacity by probing, when the OS won't report it.
+
+    Returns 0 if even sector 0 is unreadable (controller likely dead).
+    Otherwise exponentially grows a probe offset until a read fails, then
+    binary-searches the boundary. `cap` is a 4 TiB sanity limit.
+    """
+    try:
+        d0 = read_fn(0, SECTOR)
+    except OSError:
+        return 0
+    if not d0 or len(d0) < SECTOR:
+        return 0
+
+    last_good = SECTOR
+    probe = 1024 * 1024
+    while probe <= cap:
+        if _readable_at(read_fn, probe):
+            last_good = probe
+            probe *= 2
+        else:
+            break
+    lo, hi = last_good, min(probe, cap)
+    while lo + SECTOR < hi:
+        mid = (lo + hi) // 2
+        mid -= mid % SECTOR
+        if mid <= lo:
+            break
+        if _readable_at(read_fn, mid):
+            lo = mid
+        else:
+            hi = mid
+    return lo + SECTOR
+
+
+
 def image_device(
     src: str,
     dst: str,
@@ -154,6 +210,7 @@ def image_device(
     max_retries: int = 2,
     resume: bool = True,
     size_hint: int = 0,
+    total_override: int = 0,
 ) -> ImageStats:
     """Read `src` raw device into sparse file `dst`.
 
@@ -202,19 +259,32 @@ def image_device(
             f"{src} 을(를) 열 수 없습니다: {explain_permission_error(e)}"
         ) from e
 
-    # Fall back to the scanner-reported size when the OS size query fails.
-    if total <= 0 and size_hint > 0:
+    # 1) explicit override (user typed the capacity) wins.
+    if total_override > 0:
+        total = total_override
+    # 2) scanner-reported size (Get-Disk / lsblk).
+    elif total <= 0 and size_hint > 0:
         total = size_hint
+
+    # 3) OS and scanner both gave nothing (e.g. failing USB reports 0 B).
+    #    Probe the device by reading to discover the real capacity.
+    if total <= 0:
+        print("    [i] OS 가 용량을 보고하지 않습니다. 직접 읽어서 용량을 탐지합니다 ...")
+        total = _discover_size(read_fn)
+        if total > 0:
+            print(f"    [+] 탐지된 읽기 가능 용량: {human_bytes(total)}")
 
     # Round down to a sector boundary - raw reads must be sector-aligned.
     total -= total % SECTOR
 
     if total <= 0:
         close_fn()
-        raise RuntimeError(
-            f"{src} 의 용량을 확인할 수 없습니다. "
-            "USB 를 다시 꽂거나, 디스크 관리(diskmgmt.msc)에서 장치가 보이는지 "
-            "확인한 뒤 다시 시도하세요."
+        raise SizeUnknownError(
+            f"{src} 의 용량을 확인할 수 없고, 0번 섹터조차 읽지 못했습니다.\n"
+            "    이는 USB 컨트롤러가 응답하지 않는 상태(심각한 하드웨어 고장)일 "
+            "가능성이 높습니다.\n"
+            "    USB 를 다른 포트/PC 에 꽂아보고, 그래도 0바이트로 보이면 "
+            "소프트웨어로는 복구가 어렵습니다(칩-오프 등 전문업체 영역)."
         )
 
     flags = "r+b" if (resume and os.path.exists(dst)) else "wb"

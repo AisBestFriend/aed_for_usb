@@ -121,9 +121,14 @@ def run() -> int:
     else:
         resume = False
 
+    if src.size <= 0:
+        print("    [!] 이 장치는 OS 가 용량을 0바이트로 보고합니다(고장 USB 의 흔한 증상).")
+        print("        먼저 직접 읽어서 용량 자동 탐지를 시도하고, 안 되면 직접 입력하게 됩니다.")
+
     print("    이미징 시작 - 시간이 걸릴 수 있습니다. 배드 섹터는 자동 재시도/스킵합니다.")
-    stats = imager.image_device(src.path, img_path, resume=resume,
-                                size_hint=src.size)
+    stats = _image_with_size_fallback(src, img_path, resume)
+    if stats is None:
+        return 1
     imager.print_summary(src.path, img_path, stats)
 
     # ---- 4. 복구 전략 ----------------------------------------------------
@@ -157,6 +162,52 @@ def run() -> int:
 
     _print_final_summary(img_path, out_root)
     return rc
+
+
+def _parse_capacity(text: str) -> int:
+    """'32G', '16gb', '32000000000', '7.5 GiB' -> bytes. 0 if unparseable."""
+    text = text.strip().lower().replace(" ", "")
+    if not text:
+        return 0
+    mult = 1
+    for suffix, factor in (("gib", 1024 ** 3), ("gb", 1000 ** 3), ("g", 1024 ** 3),
+                           ("mib", 1024 ** 2), ("mb", 1000 ** 2), ("m", 1024 ** 2),
+                           ("tib", 1024 ** 4), ("tb", 1000 ** 4), ("t", 1024 ** 4)):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            mult = factor
+            break
+    try:
+        return int(float(text) * mult)
+    except ValueError:
+        return 0
+
+
+def _image_with_size_fallback(src, img_path: str, resume: bool):
+    """Run imaging; if size can't be detected, let the user enter it and retry.
+
+    Returns ImageStats, or None if the user gives up.
+    """
+    try:
+        return imager.image_device(src.path, img_path, resume=resume,
+                                   size_hint=src.size)
+    except imager.SizeUnknownError as e:
+        print(f"\n[!] {e}")
+        print("\n  USB 표면/포장에 적힌 용량을 알고 계시면 직접 입력해 강제로 시도할 수 있습니다.")
+        print("  예: 32G, 16GB, 64g  (모르면 그냥 [Enter] -> 복구 중단)")
+        raw = input("  USB 실제 용량 입력: ").strip()
+        cap = _parse_capacity(raw)
+        if cap <= 0:
+            print("  [i] 용량 입력이 없어 복구를 중단합니다.")
+            return None
+        print(f"  [+] {human_bytes(cap)} 로 강제 이미징을 시도합니다 "
+              "(읽을 수 없는 부분은 자동 스킵).")
+        try:
+            return imager.image_device(src.path, img_path, resume=resume,
+                                       total_override=cap)
+        except imager.SizeUnknownError:
+            print("  [!] 그래도 0번 섹터를 읽지 못했습니다. 하드웨어 고장으로 보입니다.")
+            return None
 
 
 def _print_final_summary(img_path: str, out_root: str) -> None:

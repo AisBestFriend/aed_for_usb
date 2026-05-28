@@ -45,11 +45,15 @@ def cmd_health(_args):
 
 
 def cmd_image(args):
-    if len(args) != 2:
-        print("사용법: aed image <장치경로> <저장할 이미지 파일>")
+    if len(args) < 2:
+        print("사용법: aed image <장치경로> <저장할 이미지 파일> [--size 32G]")
         return 1
     ensure_admin()
-    src, dst = args
+    src, dst = args[0], args[1]
+    total_override = 0
+    rest = args[2:]
+    if len(rest) >= 2 and rest[0] == "--size":
+        total_override = _parse_size(rest[1])
     # Look up the scanner-reported size as a fallback for size detection.
     size_hint = 0
     try:
@@ -59,9 +63,26 @@ def cmd_image(args):
                 break
     except Exception:
         pass
-    stats = imager.image_device(src, dst, size_hint=size_hint)
+    stats = imager.image_device(src, dst, size_hint=size_hint,
+                                total_override=total_override)
     imager.print_summary(src, dst, stats)
     return 0
+
+
+def _parse_size(text: str) -> int:
+    text = text.strip().lower().replace(" ", "")
+    mult = 1
+    for suffix, factor in (("gib", 1024 ** 3), ("gb", 1000 ** 3), ("g", 1024 ** 3),
+                           ("mib", 1024 ** 2), ("mb", 1000 ** 2), ("m", 1024 ** 2),
+                           ("tib", 1024 ** 4), ("tb", 1000 ** 4), ("t", 1024 ** 4)):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+            mult = factor
+            break
+    try:
+        return int(float(text) * mult)
+    except ValueError:
+        return 0
 
 
 def cmd_analyze(args):
