@@ -32,17 +32,67 @@ class ImageStats:
     retried: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Windows raw-disk access via ctypes.
+#
+# CRITICAL: all kernel32 calls below MUST declare argtypes/restype. Without
+# them ctypes marshals a Python int as a 32-bit C int, which truncates the
+# 64-bit device HANDLE on 64-bit Windows and makes every call fail with
+# ERROR_INVALID_HANDLE. We use a kernel32 bound with use_last_error=True so
+# ctypes.get_last_error() reflects the real Win32 error.
+# ---------------------------------------------------------------------------
+
+if IS_WINDOWS:
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    HANDLE = ctypes.c_void_p
+    DWORD = ctypes.c_uint32
+    BOOL = ctypes.c_int
+    LPVOID = ctypes.c_void_p
+
+    _k32.CreateFileW.argtypes = [
+        ctypes.c_wchar_p, DWORD, DWORD, LPVOID, DWORD, DWORD, HANDLE,
+    ]
+    _k32.CreateFileW.restype = HANDLE
+
+    _k32.DeviceIoControl.argtypes = [
+        HANDLE, DWORD, LPVOID, DWORD, LPVOID, DWORD,
+        ctypes.POINTER(DWORD), LPVOID,
+    ]
+    _k32.DeviceIoControl.restype = BOOL
+
+    _k32.SetFilePointerEx.argtypes = [
+        HANDLE, ctypes.c_int64, ctypes.POINTER(ctypes.c_int64), DWORD,
+    ]
+    _k32.SetFilePointerEx.restype = BOOL
+
+    _k32.ReadFile.argtypes = [
+        HANDLE, LPVOID, DWORD, ctypes.POINTER(DWORD), LPVOID,
+    ]
+    _k32.ReadFile.restype = BOOL
+
+    _k32.CloseHandle.argtypes = [HANDLE]
+    _k32.CloseHandle.restype = BOOL
+
+
 def _device_size_windows(handle) -> int:
-    # IOCTL_DISK_GET_LENGTH_INFO = 0x7405C
-    IOCTL = 0x0007405C
+    """Return device byte length, trying two IOCTLs. 0 if both fail."""
+    # IOCTL_DISK_GET_LENGTH_INFO -> GET_LENGTH_INFORMATION { LARGE_INTEGER }
+    IOCTL_DISK_GET_LENGTH_INFO = 0x0007405C
     out = ctypes.create_string_buffer(8)
-    ret = ctypes.c_uint32(0)
-    ok = ctypes.windll.kernel32.DeviceIoControl(
-        handle, IOCTL, None, 0, out, 8, ctypes.byref(ret), None
-    )
-    if not ok:
-        raise OSError(ctypes.get_last_error(), "IOCTL_DISK_GET_LENGTH_INFO failed")
-    return int.from_bytes(out.raw[:8], "little")
+    ret = DWORD(0)
+    if _k32.DeviceIoControl(handle, IOCTL_DISK_GET_LENGTH_INFO,
+                            None, 0, out, 8, ctypes.byref(ret), None):
+        return int.from_bytes(out.raw[:8], "little")
+
+    # Fallback: IOCTL_DISK_GET_DRIVE_GEOMETRY_EX -> DISK_GEOMETRY_EX
+    #   DISK_GEOMETRY (24 bytes) then LARGE_INTEGER DiskSize at offset 24.
+    IOCTL_DISK_GET_DRIVE_GEOMETRY_EX = 0x000700A0
+    geo = ctypes.create_string_buffer(32)
+    ret2 = DWORD(0)
+    if _k32.DeviceIoControl(handle, IOCTL_DISK_GET_DRIVE_GEOMETRY_EX,
+                            None, 0, geo, 32, ctypes.byref(ret2), None):
+        return int.from_bytes(geo.raw[24:32], "little")
+    return 0
 
 
 def _open_windows_raw(path: str):
@@ -51,52 +101,43 @@ def _open_windows_raw(path: str):
     FILE_SHARE_READ = 0x00000001
     FILE_SHARE_WRITE = 0x00000002
     OPEN_EXISTING = 3
-    FILE_FLAG_NO_BUFFERING = 0x20000000
+    # NOTE: deliberately NOT using FILE_FLAG_NO_BUFFERING - it would require the
+    # user-space buffer to be sector-aligned in memory, which
+    # create_string_buffer does not guarantee, causing ERROR_INVALID_PARAMETER.
     FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000
     INVALID = ctypes.c_void_p(-1).value
 
-    CreateFileW = ctypes.windll.kernel32.CreateFileW
-    CreateFileW.argtypes = [
-        ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32,
-        ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p,
-    ]
-    CreateFileW.restype = ctypes.c_void_p
-    h = CreateFileW(
+    h = _k32.CreateFileW(
         path,
         GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
         None,
         OPEN_EXISTING,
-        FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_NO_BUFFERING,
+        FILE_FLAG_SEQUENTIAL_SCAN,
         None,
     )
-    if h is None or h == INVALID:
+    if h is None or h == 0 or (h & 0xFFFFFFFFFFFFFFFF) == (INVALID & 0xFFFFFFFFFFFFFFFF):
         err = ctypes.get_last_error()
-        raise OSError(err, f"CreateFileW failed for {path} (err={err})")
+        raise OSError(0, f"CreateFileW failed for {path}", None, err)
     return h
 
 
 def _read_windows(handle, offset: int, length: int) -> bytes:
-    SetFilePointerEx = ctypes.windll.kernel32.SetFilePointerEx
-    SetFilePointerEx.argtypes = [
-        ctypes.c_void_p, ctypes.c_int64, ctypes.c_void_p, ctypes.c_uint32
-    ]
-    ReadFile = ctypes.windll.kernel32.ReadFile
-    ReadFile.argtypes = [
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
-        ctypes.c_void_p, ctypes.c_void_p,
-    ]
-    if not SetFilePointerEx(handle, ctypes.c_int64(offset), None, 0):
-        raise OSError(ctypes.get_last_error(), "SetFilePointerEx failed")
+    new_pos = ctypes.c_int64(0)
+    if not _k32.SetFilePointerEx(handle, ctypes.c_int64(offset),
+                                 ctypes.byref(new_pos), 0):  # FILE_BEGIN
+        err = ctypes.get_last_error()
+        raise OSError(0, "SetFilePointerEx failed", None, err)
     buf = ctypes.create_string_buffer(length)
-    n = ctypes.c_uint32(0)
-    if not ReadFile(handle, buf, length, ctypes.byref(n), None):
-        raise OSError(ctypes.get_last_error(), "ReadFile failed")
+    n = DWORD(0)
+    if not _k32.ReadFile(handle, buf, length, ctypes.byref(n), None):
+        err = ctypes.get_last_error()
+        raise OSError(0, "ReadFile failed", None, err)
     return buf.raw[: n.value]
 
 
 def _close_windows(handle) -> None:
-    ctypes.windll.kernel32.CloseHandle(handle)
+    _k32.CloseHandle(handle)
 
 
 def _device_size_posix(fd) -> int:
@@ -112,12 +153,16 @@ def image_device(
     block: int = DEFAULT_BLOCK,
     max_retries: int = 2,
     resume: bool = True,
+    size_hint: int = 0,
 ) -> ImageStats:
     """Read `src` raw device into sparse file `dst`.
 
     Strategy: try big blocks for speed; on read error fall back to RETRY_BLOCK
     then SKIP_BLOCK. Bad ranges are zero-filled in the image and logged to
     `dst + ".aedlog"` so a later pass can re-attempt them.
+
+    `size_hint` is the device size as reported by the scanner (Get-Disk /
+    lsblk). It is used as a fallback when the size IOCTL/seek fails.
     """
     log_path = dst + ".aedlog"
     bad_ranges = []                               # list of [start, length]
@@ -146,18 +191,30 @@ def image_device(
             close_fn = lambda: _close_windows(h)
         else:
             fd = os.open(src, os.O_RDONLY)
-            total = _device_size_posix(fd)
+            try:
+                total = _device_size_posix(fd)
+            except OSError:
+                total = 0
             read_fn = lambda off, ln: (os.lseek(fd, off, os.SEEK_SET), os.read(fd, ln))[1]
             close_fn = lambda: os.close(fd)
     except OSError as e:
         raise RuntimeError(
-            f"Could not open {src}: {explain_permission_error(e)}"
+            f"{src} 을(를) 열 수 없습니다: {explain_permission_error(e)}"
         ) from e
+
+    # Fall back to the scanner-reported size when the OS size query fails.
+    if total <= 0 and size_hint > 0:
+        total = size_hint
+
+    # Round down to a sector boundary - raw reads must be sector-aligned.
+    total -= total % SECTOR
 
     if total <= 0:
         close_fn()
         raise RuntimeError(
-            f"{src} 의 용량을 확인할 수 없습니다. OS 가 장치를 인식하는지 확인하세요."
+            f"{src} 의 용량을 확인할 수 없습니다. "
+            "USB 를 다시 꽂거나, 디스크 관리(diskmgmt.msc)에서 장치가 보이는지 "
+            "확인한 뒤 다시 시도하세요."
         )
 
     flags = "r+b" if (resume and os.path.exists(dst)) else "wb"

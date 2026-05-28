@@ -122,7 +122,8 @@ def run() -> int:
         resume = False
 
     print("    이미징 시작 - 시간이 걸릴 수 있습니다. 배드 섹터는 자동 재시도/스킵합니다.")
-    stats = imager.image_device(src.path, img_path, resume=resume)
+    stats = imager.image_device(src.path, img_path, resume=resume,
+                                size_hint=src.size)
     imager.print_summary(src.path, img_path, stats)
 
     # ---- 4. 복구 전략 ----------------------------------------------------

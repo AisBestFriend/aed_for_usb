@@ -50,7 +50,16 @@ def cmd_image(args):
         return 1
     ensure_admin()
     src, dst = args
-    stats = imager.image_device(src, dst)
+    # Look up the scanner-reported size as a fallback for size detection.
+    size_hint = 0
+    try:
+        for d in scanner.scan():
+            if d.path.lower() == src.lower():
+                size_hint = d.size
+                break
+    except Exception:
+        pass
+    stats = imager.image_device(src, dst, size_hint=size_hint)
     imager.print_summary(src, dst, stats)
     return 0
 
