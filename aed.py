@@ -161,22 +161,45 @@ COMMANDS = {
 def main(argv=None) -> int:
     init_console()
     argv = argv or sys.argv[1:]
-    if not argv:
-        return cmd_wizard([])
-    if argv[0] in ("-h", "--help", "help", "도움말"):
-        return _usage()
-    cmd = COMMANDS.get(argv[0])
-    if cmd is None:
-        print(f"알 수 없는 명령: {argv[0]}\n")
-        return _usage()
+    interactive = not argv      # no args = launched by double-click
+    rc = 0
     try:
-        return cmd(argv[1:])
+        if not argv:
+            rc = cmd_wizard([])
+        elif argv[0] in ("-h", "--help", "help", "도움말"):
+            rc = _usage()
+        else:
+            cmd = COMMANDS.get(argv[0])
+            if cmd is None:
+                print(f"알 수 없는 명령: {argv[0]}\n")
+                rc = _usage()
+            else:
+                rc = cmd(argv[1:])
     except KeyboardInterrupt:
         print("\n[!] 사용자가 중단했습니다")
-        return 130
+        rc = 130
     except RuntimeError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 3
+        print(f"\n[!] {e}", file=sys.stderr)
+        rc = 3
+    except Exception as e:
+        print(f"\n[!] 예기치 못한 오류: {type(e).__name__}: {e}", file=sys.stderr)
+        import traceback
+        traceback.print_exc()
+        rc = 4
+    if interactive:
+        _pause_on_exit()
+    return rc
+
+
+def _pause_on_exit() -> None:
+    """Keep the console window open so the user can read the error message
+    when aed.exe was launched by double-click."""
+    try:
+        # only pause when stdin is a real console (i.e. interactive launch)
+        if sys.stdin and sys.stdin.isatty():
+            input("\n[엔터 키를 누르면 종료됩니다] ")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

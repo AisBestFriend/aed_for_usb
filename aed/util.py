@@ -138,6 +138,11 @@ def explain_permission_error(err: OSError) -> str:
     """디스크 raw access OSError 를 사용자 안내 문구로 변환."""
     code = getattr(err, "winerror", None) or err.errno
     if IS_WINDOWS:
+        if code in (2, 3):     # ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
+            return ("장치를 찾을 수 없습니다. 스캔 직후에 USB 가 분리되었거나,\n"
+                    "    고장으로 컨트롤러가 떨어졌다가 다시 붙는 상태일 수 있습니다.\n"
+                    "    USB 를 단단히 다시 꽂고(되도록 PC 본체 뒷면 USB 포트)\n"
+                    "    프로그램을 처음부터 다시 실행하세요.")
         if code in (5,):       # ERROR_ACCESS_DENIED
             return ("권한이 거부되었습니다. 관리자 권한으로 다시 실행하세요 "
                     "(우클릭 -> '관리자 권한으로 실행').")
