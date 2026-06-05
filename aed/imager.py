@@ -170,15 +170,15 @@ def _readable_at(read_fn, off: int) -> bool:
 def _discover_size(read_fn, cap: int = 4 * 1024 ** 4) -> int:
     """Find readable capacity by probing, when the OS won't report it.
 
-    Returns 0 if even sector 0 is unreadable (controller likely dead).
-    Otherwise exponentially grows a probe offset until a read fails, then
-    binary-searches the boundary. `cap` is a 4 TiB sanity limit.
+    Returns 0 only if NOTHING is readable in the first ~16 MiB (controller
+    likely dead). A bad sector 0 alone does not disqualify the device - we
+    look for any readable anchor first. Then we exponentially grow a probe
+    offset until a read fails and binary-search the boundary. `cap` is a
+    4 TiB sanity limit.
     """
-    try:
-        d0 = read_fn(0, SECTOR)
-    except OSError:
-        return 0
-    if not d0 or len(d0) < SECTOR:
+    # An isolated bad sector 0 must not make us declare the drive dead.
+    anchors = [0, SECTOR, 4096, 64 * 1024, 1024 * 1024, 16 * 1024 * 1024]
+    if not any(_readable_at(read_fn, a) for a in anchors):
         return 0
 
     last_good = SECTOR
@@ -297,6 +297,12 @@ def image_device(
     prog = Progress(total, label=f"이미징 {os.path.basename(src)}")
     offset = resume_from
 
+    # Early-abort guard: if the drive yields nothing at all in the first chunk
+    # of the run, don't grind through the whole (possibly forced) size with
+    # retries on every block - bail out and report it as unreadable.
+    EARLY_ABORT_AFTER = 32 * 1024 * 1024
+    aborted_early = False
+
     def _try_read(off: int, length: int) -> Optional[bytes]:
         for attempt in range(max_retries + 1):
             try:
@@ -354,6 +360,11 @@ def image_device(
             offset = end
             prog.update(offset, f"정상={human_bytes(stats.good)} "
                                 f"불량={human_bytes(stats.bad)}")
+
+            if (stats.good == 0
+                    and (offset - resume_from) >= EARLY_ABORT_AFTER):
+                aborted_early = True
+                break
     finally:
         prog.finish()
         out.flush()
@@ -369,6 +380,10 @@ def image_device(
             fh.write(f"# next={offset}\n")
             for s, n in bad_ranges:
                 fh.write(f"{s} {n}\n")
+
+    if aborted_early:
+        print(f"\n    [!] 처음 {human_bytes(EARLY_ABORT_AFTER)} 에서 단 한 바이트도 "
+              "읽지 못해 이미징을 조기 중단했습니다.")
 
     return stats
 

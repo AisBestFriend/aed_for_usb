@@ -131,6 +131,23 @@ def run() -> int:
         return 1
     imager.print_summary(src.path, img_path, stats)
 
+    if stats.good <= 0:
+        print()
+        print("=" * 70)
+        print("  [결론] 이 USB 에서 단 한 바이트도 읽지 못했습니다.")
+        print("=" * 70)
+        print("  USB 컨트롤러가 응답하지 않는 하드웨어 고장으로 보입니다.")
+        print("  이 경우 어떤 소프트웨어로도 복구가 불가능하며, NAND 칩을 직접")
+        print("  읽는 '칩-오프' 같은 물리 복구(데이터 복구 전문업체)가 필요합니다.")
+        print("  - 다른 USB 포트 / 다른 PC 에 꽂아 한 번 더 시도해 보세요.")
+        print("  - 인식이 들쑥날쑥하면, 인식되는 순간 곧바로 다시 실행해 보세요.")
+        return 1
+
+    if stats.bad > 0:
+        readable_pct = 100.0 * stats.good / max(stats.total, 1)
+        print(f"    [i] 전체의 {readable_pct:.1f}% 를 읽었습니다. 읽은 부분에서 "
+              "최대한 복구를 진행합니다.")
+
     # ---- 4. 복구 전략 ----------------------------------------------------
     parts = analyzer.analyze(img_path)
     analyzer.print_partitions(img_path, parts)
